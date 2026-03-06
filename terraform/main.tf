@@ -20,7 +20,8 @@ resource "render_web_service" "api_flask" {
 
   runtime_source = {
     image = {
-      image_url = "ghcr.io/${var.ghcr_username}/mon-api-flask:${var.image_tag}"
+      image_url = "ghcr.io/${var.ghcr_username}/mon-api-flask"
+      tag       = var.image_tag
       credentials = {
         username              = var.ghcr_username
         personal_access_token = var.ghcr_token

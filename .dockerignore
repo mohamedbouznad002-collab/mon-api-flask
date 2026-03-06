@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+tests/
+.pytest_cache/
+.git/
+.gitignore
+terraform/
+.github/
+.env

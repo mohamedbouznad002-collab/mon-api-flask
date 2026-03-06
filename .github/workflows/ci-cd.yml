@@ -1,0 +1,109 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mon-api-flask
+
+jobs:
+  tests:
+    name: Tests d'intégration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configurer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Lancer les tests
+        run: pytest tests/test_integration.py -v
+
+  build-and-push:
+    name: Build et Push Docker
+    runs-on: ubuntu-latest
+    needs: tests
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Connexion à GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extraire les métadonnées Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build et Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  terraform-deploy:
+    name: Déploiement Terraform
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+        env:
+          TF_VAR_render_api_key: ${{ secrets.RENDER_API_KEY }}
+          TF_VAR_render_owner_id: ${{ secrets.RENDER_OWNER_ID }}
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: terraform plan -var="image_tag=sha-$(echo ${{ github.sha }} | cut -c1-7)" -out=tfplan
+        env:
+          TF_VAR_render_api_key: ${{ secrets.RENDER_API_KEY }}
+          TF_VAR_render_owner_id: ${{ secrets.RENDER_OWNER_ID }}
+          TF_VAR_ghcr_username: ${{ github.repository_owner }}
+          TF_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_render_api_key: ${{ secrets.RENDER_API_KEY }}
+          TF_VAR_render_owner_id: ${{ secrets.RENDER_OWNER_ID }}
+          TF_VAR_ghcr_username: ${{ github.repository_owner }}
+          TF_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
